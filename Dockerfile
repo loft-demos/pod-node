@@ -18,12 +18,10 @@ COPY files /
 # -----------------------------------------------------------------------------
 # Helper: write /etc/vcluster/vcluster-flags.env based on PODNODE_CPU/MEMORY
 # -----------------------------------------------------------------------------
-RUN mkdir -p /usr/local/bin && \
-    cat << 'EOF' > /usr/local/bin/podnode-write-vcluster-flags.sh
+RUN cat << 'EOF' > /usr/local/bin/podnode-write-vcluster-flags.sh
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Use the container env (this runs as a normal process, not a systemd unit)
 CPU_DESIRED_RAW="${PODNODE_CPU:-}"
 MEM_DESIRED_RAW="${PODNODE_MEMORY:-}"
 
@@ -69,7 +67,7 @@ if (( RESERVE_MEM_KI < 0 )); then RESERVE_MEM_KI=0; fi
 mkdir -p /etc/vcluster
 
 cat > /etc/vcluster/vcluster-flags.env <<EOF2
-KUBELET_EXTRA_ARGS="--kube-reserved=cpu=${RESERVE_CPU_M}m,memory=${RESERVE_MEM_KI}Ki --system-reserved=cpu=0m,memory=0Ki"
+KUBELET_EXTRA_ARGS="--kube-reserved=cpu=${RESERVE_CPU_M}m,memory=${RESERVE_MEM_KI}Ki --system-reserved=cpu=0m,memory=0Ki --enforce-node-allocatable=pods,kube-reserved,system-reserved"
 EOF2
 
 exit 0
