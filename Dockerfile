@@ -2,7 +2,7 @@ FROM ubuntu:noble
 
 ARG TARGETARCH
 
-# Install deps
+# Install deps (systemd, cloud-init, etc.)
 RUN apt update && \
     DEBIAN_FRONTEND=noninteractive apt install -y \
       curl fuse binutils jq conntrack iptables strace \
@@ -13,10 +13,10 @@ RUN apt update && \
 
 WORKDIR /home
 
-# Copy any existing files you already use
+# Keep copying any existing files you already use (entrypoint, units, etc.)
 COPY files /
 
-# ---- Create clamp script directly in image ----
+# ---- Clamp script (writes kubelet extra args to the file kubelet already sources) ----
 RUN mkdir -p /usr/local/bin && \
     cat << 'EOF' > /usr/local/bin/podnode-clamp-allocatable.sh
 #!/usr/bin/env bash
@@ -25,13 +25,14 @@ set -euo pipefail
 CPU_DESIRED_RAW="${PODNODE_CPU:-}"
 MEM_DESIRED_RAW="${PODNODE_MEMORY:-}"
 
+# If not set, do nothing
 if [[ -z "${CPU_DESIRED_RAW}" || -z "${MEM_DESIRED_RAW}" ]]; then
   exit 0
 fi
 
-# Wait for kubelet (installed by Auto Nodes)
-for i in {1..120}; do
-  if command -v kubelet >/dev/null 2>&1; then
+# Wait for kubelet unit to exist (installed by vCluster Auto Nodes)
+for i in {1..240}; do
+  if systemctl list-unit-files | grep -q '^kubelet\.service'; then
     break
   fi
   sleep 1
@@ -72,11 +73,11 @@ if (( RESERVE_CPU_M < 0 )); then RESERVE_CPU_M=0; fi
 RESERVE_MEM_KI="$(( HOST_MEM_KI - DESIRED_MEM_KI ))"
 if (( RESERVE_MEM_KI < 0 )); then RESERVE_MEM_KI=0; fi
 
-mkdir -p /etc/systemd/system/kubelet.service.d
-
-cat > /etc/systemd/system/kubelet.service.d/20-podnode-allocatable.conf <<EOF2
-[Service]
-Environment="KUBELET_EXTRA_ARGS=--kube-reserved=cpu=${RESERVE_CPU_M}m,memory=${RESERVE_MEM_KI}Ki --system-reserved=cpu=0m,memory=0Ki"
+# kubelet drop-in 10-kubeadm.conf already sources this file:
+#   EnvironmentFile=-/etc/vcluster/vcluster-flags.env
+mkdir -p /etc/vcluster
+cat > /etc/vcluster/vcluster-flags.env <<EOF2
+KUBELET_EXTRA_ARGS="--kube-reserved=cpu=${RESERVE_CPU_M}m,memory=${RESERVE_MEM_KI}Ki --system-reserved=cpu=0m,memory=0Ki"
 EOF2
 
 systemctl daemon-reload
@@ -85,18 +86,16 @@ EOF
 
 RUN chmod +x /usr/local/bin/podnode-clamp-allocatable.sh
 
-# ---- Create systemd unit directly ----
+# ---- systemd unit (no invalid Environment= lines) ----
 RUN mkdir -p /etc/systemd/system && \
     cat << 'EOF' > /etc/systemd/system/podnode-allocatable.service
 [Unit]
 Description=Clamp kubelet allocatable to PODNODE_CPU/PODNODE_MEMORY (workshop)
-After=network-online.target
-Wants=network-online.target
+After=cloud-final.service kubelet.service
+Wants=cloud-final.service kubelet.service
 
 [Service]
 Type=oneshot
-Environment=PODNODE_CPU
-Environment=PODNODE_MEMORY
 ExecStart=/usr/local/bin/podnode-clamp-allocatable.sh
 RemainAfterExit=true
 
@@ -104,12 +103,17 @@ RemainAfterExit=true
 WantedBy=multi-user.target
 EOF
 
-# Enable service
+# Enable service so it runs on boot
 RUN systemctl enable podnode-allocatable.service
 
+# Delete ubuntu user (ignore if missing)
 RUN deluser ubuntu || true
 
+# Let Docker know how to stop the container
 STOPSIGNAL SIGRTMIN+3
+
+# Tell systemd we’re in a container
 ENV container=docker
 
+# Launch systemd as PID 1
 CMD ["/entrypoint.sh"]
