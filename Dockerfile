@@ -67,7 +67,7 @@ if (( RESERVE_MEM_KI < 0 )); then RESERVE_MEM_KI=0; fi
 mkdir -p /etc/vcluster
 
 cat > /etc/vcluster/vcluster-flags.env <<EOF2
-KUBELET_EXTRA_ARGS="--kube-reserved=cpu=${RESERVE_CPU_M}m,memory=${RESERVE_MEM_KI}Ki --system-reserved=cpu=0m,memory=0Ki --enforce-node-allocatable=pods,kube-reserved,system-reserved"
+KUBELET_EXTRA_ARGS=--kube-reserved=cpu=${RESERVE_CPU_M}m,memory=${RESERVE_MEM_KI}Ki --system-reserved=cpu=0m,memory=0Ki --enforce-node-allocatable=pods,kube-reserved,system-reserved
 EOF2
 
 exit 0
