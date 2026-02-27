@@ -12,32 +12,21 @@ RUN apt update && \
 
 WORKDIR /home
 
-# Keep your existing entrypoint / files
+# Keep your existing entrypoint + any other files you already use
 COPY files /
 
-# Script: compute kubelet reserves from PODNODE_CPU/PODNODE_MEMORY and write /etc/vcluster/vcluster-flags.env
+# -----------------------------------------------------------------------------
+# Helper: write /etc/vcluster/vcluster-flags.env based on PODNODE_CPU/MEMORY
+# -----------------------------------------------------------------------------
 RUN mkdir -p /usr/local/bin && \
-    cat << 'EOF' > /usr/local/bin/podnode-write-kubelet-extra-args.sh
+    cat << 'EOF' > /usr/local/bin/podnode-write-vcluster-flags.sh
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Read container env vars robustly (systemd ExecStartPre may not inherit container env)
-get_env() {
-  local key="$1"
-  # 1) try current process env
-  local v="${!key:-}"
-  if [[ -n "$v" ]]; then
-    printf "%s" "$v"
-    return 0
-  fi
-  # 2) try PID1 env (systemd)
-  tr '\0' '\n' </proc/1/environ 2>/dev/null | awk -F= -v k="$key" '$1==k {print substr($0, length(k)+2); exit}'
-}
+# Use the container env (this runs as a normal process, not a systemd unit)
+CPU_DESIRED_RAW="${PODNODE_CPU:-}"
+MEM_DESIRED_RAW="${PODNODE_MEMORY:-}"
 
-CPU_DESIRED_RAW="$(get_env PODNODE_CPU || true)"
-MEM_DESIRED_RAW="$(get_env PODNODE_MEMORY || true)"
-
-# If not set, do nothing (keep default behavior)
 if [[ -z "${CPU_DESIRED_RAW}" || -z "${MEM_DESIRED_RAW}" ]]; then
   exit 0
 fi
@@ -77,9 +66,8 @@ if (( RESERVE_CPU_M < 0 )); then RESERVE_CPU_M=0; fi
 RESERVE_MEM_KI="$(( HOST_MEM_KI - DESIRED_MEM_KI ))"
 if (( RESERVE_MEM_KI < 0 )); then RESERVE_MEM_KI=0; fi
 
-# kubelet drop-in (10-kubeadm.conf) already sources this file:
-#   EnvironmentFile=-/etc/vcluster/vcluster-flags.env
 mkdir -p /etc/vcluster
+
 cat > /etc/vcluster/vcluster-flags.env <<EOF2
 KUBELET_EXTRA_ARGS="--kube-reserved=cpu=${RESERVE_CPU_M}m,memory=${RESERVE_MEM_KI}Ki --system-reserved=cpu=0m,memory=0Ki"
 EOF2
@@ -87,14 +75,58 @@ EOF2
 exit 0
 EOF
 
-RUN chmod +x /usr/local/bin/podnode-write-kubelet-extra-args.sh
+RUN chmod +x /usr/local/bin/podnode-write-vcluster-flags.sh
 
-# Hook into kubelet startup (guaranteed to run, unlike boot targets in some container setups)
-RUN mkdir -p /etc/systemd/system/kubelet.service.d && \
-    cat << 'EOF' > /etc/systemd/system/kubelet.service.d/20-podnode-allocatable.conf
-[Service]
-ExecStartPre=/usr/local/bin/podnode-write-kubelet-extra-args.sh
+# -----------------------------------------------------------------------------
+# Watcher: wait for kubelet bootstrap to finish, then write flags & restart kubelet
+# -----------------------------------------------------------------------------
+RUN cat << 'EOF' > /usr/local/bin/podnode-allocatable-watcher.sh
+#!/usr/bin/env bash
+set -euo pipefail
+
+# We consider kubelet "ready for override" when the kubeadm drop-in exists.
+# In your earlier output, kubelet uses: /etc/systemd/system/kubelet.service.d/10-kubeadm.conf
+KUBEADM_DROPIN="/etc/systemd/system/kubelet.service.d/10-kubeadm.conf"
+
+# Wait up to ~5 minutes for kubelet + drop-in + /etc/vcluster
+for i in {1..300}; do
+  if [[ -f "${KUBEADM_DROPIN}" ]] && systemctl status kubelet >/dev/null 2>&1 && [[ -d /etc/vcluster ]]; then
+    break
+  fi
+  sleep 1
+done
+
+# If still not ready, bail (don’t block container startup)
+if [[ ! -f "${KUBEADM_DROPIN}" ]]; then
+  exit 0
+fi
+
+# Write the env file kubelet already sources (per 10-kubeadm.conf):
+#   EnvironmentFile=-/etc/vcluster/vcluster-flags.env
+/usr/local/bin/podnode-write-vcluster-flags.sh || true
+
+# Restart kubelet once so it re-reads EnvironmentFiles
+systemctl restart kubelet || true
+
+exit 0
 EOF
+
+RUN chmod +x /usr/local/bin/podnode-allocatable-watcher.sh
+
+# -----------------------------------------------------------------------------
+# Shim entrypoint: start watcher in background, then run original /entrypoint.sh
+# -----------------------------------------------------------------------------
+RUN cat << 'EOF' > /usr/local/bin/podnode-entrypoint.sh
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Start watcher in background (single-shot; exits on its own)
+/usr/local/bin/podnode-allocatable-watcher.sh >/var/log/podnode-allocatable-watcher.log 2>&1 &
+
+exec /entrypoint.sh
+EOF
+
+RUN chmod +x /usr/local/bin/podnode-entrypoint.sh
 
 # Delete ubuntu user (ignore if missing)
 RUN deluser ubuntu || true
@@ -102,4 +134,5 @@ RUN deluser ubuntu || true
 STOPSIGNAL SIGRTMIN+3
 ENV container=docker
 
-CMD ["/entrypoint.sh"]
+# Use the shim entrypoint so the watcher always runs
+CMD ["/usr/local/bin/podnode-entrypoint.sh"]
