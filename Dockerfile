@@ -22,13 +22,35 @@ RUN mkdir -p /usr/local/bin && \
 #!/usr/bin/env bash
 set -euo pipefail
 
+log() {
+  # show up in: journalctl -u podnode-allocatable.service
+  logger -t podnode-allocatable "$*"
+}
+
+# Fallback: systemd units sometimes don't inherit container env vars.
+# Read the original container env from PID 1 (systemd) environment.
+get_from_pid1_env() {
+  local key="$1"
+  tr '\0' '\n' </proc/1/environ 2>/dev/null | awk -F= -v k="$key" '$1==k {print substr($0, length(k)+2); exit}'
+}
+
 CPU_DESIRED_RAW="${PODNODE_CPU:-}"
 MEM_DESIRED_RAW="${PODNODE_MEMORY:-}"
 
-# If not set, do nothing
+if [[ -z "${CPU_DESIRED_RAW}" ]]; then
+  CPU_DESIRED_RAW="$(get_from_pid1_env PODNODE_CPU || true)"
+fi
+if [[ -z "${MEM_DESIRED_RAW}" ]]; then
+  MEM_DESIRED_RAW="$(get_from_pid1_env PODNODE_MEMORY || true)"
+fi
+
+# If still not set, do nothing
 if [[ -z "${CPU_DESIRED_RAW}" || -z "${MEM_DESIRED_RAW}" ]]; then
+  log "PODNODE_CPU/PODNODE_MEMORY not found; skipping"
   exit 0
 fi
+
+log "Target allocatable from env: cpu=${CPU_DESIRED_RAW} mem=${MEM_DESIRED_RAW}"
 
 # Wait for kubelet unit to exist (installed by vCluster Auto Nodes)
 for i in {1..240}; do
@@ -73,6 +95,8 @@ if (( RESERVE_CPU_M < 0 )); then RESERVE_CPU_M=0; fi
 RESERVE_MEM_KI="$(( HOST_MEM_KI - DESIRED_MEM_KI ))"
 if (( RESERVE_MEM_KI < 0 )); then RESERVE_MEM_KI=0; fi
 
+log "Host: cpu=${HOST_CPU_CORES} memKi=${HOST_MEM_KI} -> reserve cpu=${RESERVE_CPU_M}m mem=${RESERVE_MEM_KI}Ki"
+
 # kubelet drop-in 10-kubeadm.conf already sources this file:
 #   EnvironmentFile=-/etc/vcluster/vcluster-flags.env
 mkdir -p /etc/vcluster
@@ -80,13 +104,15 @@ cat > /etc/vcluster/vcluster-flags.env <<EOF2
 KUBELET_EXTRA_ARGS="--kube-reserved=cpu=${RESERVE_CPU_M}m,memory=${RESERVE_MEM_KI}Ki --system-reserved=cpu=0m,memory=0Ki"
 EOF2
 
+log "Wrote /etc/vcluster/vcluster-flags.env"
 systemctl daemon-reload
 systemctl restart kubelet || true
+log "Restarted kubelet"
 EOF
 
 RUN chmod +x /usr/local/bin/podnode-clamp-allocatable.sh
 
-# ---- systemd unit (no invalid Environment= lines) ----
+# ---- systemd unit ----
 RUN mkdir -p /etc/systemd/system && \
     cat << 'EOF' > /etc/systemd/system/podnode-allocatable.service
 [Unit]
