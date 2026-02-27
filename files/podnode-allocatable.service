@@ -1,0 +1,14 @@
+[Unit]
+Description=Clamp kubelet allocatable to PODNODE_CPU/PODNODE_MEMORY (workshop)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=PODNODE_CPU
+Environment=PODNODE_MEMORY
+ExecStart=/usr/local/bin/podnode-clamp-allocatable.sh
+RemainAfterExit=true
+
+[Install]
+WantedBy=multi-user.target
