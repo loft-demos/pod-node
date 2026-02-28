@@ -66,3 +66,7 @@ env {
 
 This keeps kubelet allocatable CPU/memory and max pod count aligned with the
 NodeType selected by Karpenter/vCluster Platform.
+
+Important: for kubelet node `capacity` to reflect NodeType CPU/memory, run the
+pod-node container with matching `resources.requests` and `resources.limits`
+(Guaranteed QoS) in your NodeProvider pod template.
