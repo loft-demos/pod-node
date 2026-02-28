@@ -70,3 +70,49 @@ NodeType selected by Karpenter/vCluster Platform.
 Important: for kubelet node `capacity` to reflect NodeType CPU/memory, run the
 pod-node container with matching `resources.requests` and `resources.limits`
 (Guaranteed QoS) in your NodeProvider pod template.
+
+Use this pattern:
+
+```hcl
+locals {
+  node_cpu  = tostring(var.vcluster.nodeType.spec.resources.cpu)
+  node_mem  = tostring(var.vcluster.nodeType.spec.resources.memory)
+  node_pods = tostring(var.vcluster.nodeType.spec.resources.pods)
+}
+
+container {
+  name  = "pod-node"
+  image = var.image
+
+  env {
+    name  = "PODNODE_CPU"
+    value = local.node_cpu
+  }
+  env {
+    name  = "PODNODE_MEMORY"
+    value = local.node_mem
+  }
+  env {
+    name  = "PODNODE_PODS"
+    value = local.node_pods
+  }
+
+  resources {
+    requests = {
+      cpu    = local.node_cpu
+      memory = local.node_mem
+    }
+    limits = {
+      cpu    = local.node_cpu
+      memory = local.node_mem
+    }
+  }
+}
+```
+
+Quick verification after a node joins:
+
+```bash
+kubectl get node <node-name> -o jsonpath='{.status.capacity.cpu}{" "}{.status.capacity.memory}{" "}{.status.capacity.pods}{"\n"}'
+kubectl get node <node-name> -o jsonpath='{.status.allocatable.cpu}{" "}{.status.allocatable.memory}{" "}{.status.allocatable.pods}{"\n"}'
+```
