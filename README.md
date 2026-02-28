@@ -14,3 +14,22 @@ curl -sfL https://raw.githubusercontent.com/loft-sh/init-node/main/init.sh | sh 
 # Join the pod into a cluster
 kubeadm join --token <token> <control-plane-host>:<control-plane-port> --discovery-token-ca-cert-hash sha256:<hash>
 ```
+
+### Node Sizing via Environment Variables
+
+When `PODNODE_CPU` and `PODNODE_MEMORY` are set, pod-node adjusts kubelet
+reserved resources so allocatable CPU/memory tracks those values.
+
+When `PODNODE_PODS` is set to a positive integer, pod-node sets kubelet
+`--max-pods` to that value.
+
+Example:
+```yaml
+env:
+  - name: PODNODE_CPU
+    value: "2"
+  - name: PODNODE_MEMORY
+    value: "4Gi"
+  - name: PODNODE_PODS
+    value: "20"
+```
