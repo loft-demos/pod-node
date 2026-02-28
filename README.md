@@ -33,3 +33,36 @@ env:
   - name: PODNODE_PODS
     value: "20"
 ```
+
+### vCluster Platform Auto Nodes (Pod NodeProvider)
+
+This image can be used by a vCluster Platform Auto Nodes Pod NodeProvider to
+create pod-backed worker nodes.
+
+For Auto Nodes, map your selected NodeType resources into container env vars:
+
+```hcl
+node_cpu  = tostring(var.vcluster.nodeType.spec.resources.cpu)
+node_mem  = tostring(var.vcluster.nodeType.spec.resources.memory)
+node_pods = tostring(var.vcluster.nodeType.spec.resources.pods)
+```
+
+Then pass them into the pod-node container:
+
+```hcl
+env {
+  name  = "PODNODE_CPU"
+  value = local.node_cpu
+}
+env {
+  name  = "PODNODE_MEMORY"
+  value = local.node_mem
+}
+env {
+  name  = "PODNODE_PODS"
+  value = local.node_pods
+}
+```
+
+This keeps kubelet allocatable CPU/memory and max pod count aligned with the
+NodeType selected by Karpenter/vCluster Platform.
