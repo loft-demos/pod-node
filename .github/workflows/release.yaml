@@ -14,10 +14,6 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-      - id: get_version
-        run: |
-          RELEASE_VERSION=$(echo $GITHUB_REF | sed -nE 's!refs/tags/!!p')
-          echo "::set-output name=release_version::$RELEASE_VERSION"
       - name: Get Docker tags
         id: docker_meta
         uses: docker/metadata-action@v4

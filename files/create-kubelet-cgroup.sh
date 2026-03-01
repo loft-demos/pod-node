@@ -22,12 +22,21 @@ if [[ ! -f "/sys/fs/cgroup/cgroup.controllers" ]]; then
 	exit 1
 fi
 
+drain_root_cgroup() {
+	local root="/sys/fs/cgroup"
+	local init_scope="${root}/init.scope"
+	mkdir -p "${init_scope}"
+	while read -r pid; do
+		if [[ -n "${pid}" && "${pid}" != "0" ]]; then
+			echo "${pid}" > "${init_scope}/cgroup.procs" || true
+		fi
+	done < "${root}/cgroup.procs"
+}
+
 # NOTE: we can't use `test -s` because cgroup.procs is not a regular file.
 if grep -qv '^0$' /sys/fs/cgroup/cgroup.procs ; then
-	echo 'ERROR: this script needs /sys/fs/cgroup/cgroup.procs to be empty (for writing the top-level cgroup.subtree_control)' >&2
-	# So, this script needs to be called after launching systemd.
-	# This script cannot be called from /usr/local/bin/entrypoint.
-	exit 1
+	echo 'WARN: /sys/fs/cgroup/cgroup.procs is not empty; moving remaining processes to init.scope' >&2
+	drain_root_cgroup
 fi
 
 ensure_subtree_control() {
