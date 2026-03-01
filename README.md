@@ -67,9 +67,10 @@ env {
 This keeps kubelet allocatable CPU/memory and max pod count aligned with the
 NodeType selected by Karpenter/vCluster Platform.
 
-Important: for kubelet node `capacity` to reflect NodeType CPU/memory, run the
-pod-node container with matching `resources.requests` and `resources.limits`
-(Guaranteed QoS) in your NodeProvider pod template.
+Important: set matching `resources.requests` and `resources.limits`
+(Guaranteed QoS) in your NodeProvider pod template. In this pod-node model,
+CPU/memory `allocatable` is clamped from `PODNODE_CPU`/`PODNODE_MEMORY`, while
+CPU/memory `capacity` may still reflect host-detected values.
 
 Use this pattern:
 
@@ -115,4 +116,17 @@ Quick verification after a node joins:
 ```bash
 kubectl get node <node-name> -o jsonpath='{.status.capacity.cpu}{" "}{.status.capacity.memory}{" "}{.status.capacity.pods}{"\n"}'
 kubectl get node <node-name> -o jsonpath='{.status.allocatable.cpu}{" "}{.status.allocatable.memory}{" "}{.status.allocatable.pods}{"\n"}'
+```
+
+Runtime diagnostics:
+
+```bash
+# Check effective kubelet args written by pod-node
+kubectl -n <namespace> exec <pod-node-pod> -- cat /var/lib/kubelet/kubeadm-flags.env
+
+# Check clamp startup logs
+kubectl -n <namespace> exec <pod-node-pod> -- tail -n 200 /var/log/podnode-allocatable-watcher.log
+
+# Validate cgroup helper scripts and startup chain exist in the image
+kubectl -n <namespace> exec <pod-node-pod> -- ls -l /entrypoint.sh /escape-cgroup.sh /create-kubelet-cgroup.sh /usr/local/bin/podnode-entrypoint.sh
 ```

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-KUBEADM_FLAGS="/var/lib/kubelet/kubeadm-flags.env"
+KUBEADM_FLAGS="${PODNODE_KUBEADM_FLAGS_PATH:-/var/lib/kubelet/kubeadm-flags.env}"
 CPU_DESIRED_RAW="${PODNODE_CPU:-}"
 MEM_DESIRED_RAW="${PODNODE_MEMORY:-}"
 PODS_DESIRED_RAW="${PODNODE_PODS:-}"
@@ -22,8 +22,8 @@ if [[ ! -f "${KUBEADM_FLAGS}" ]]; then
   exit 0
 fi
 
-HOST_CPU_CORES="$(nproc)"
-HOST_MEM_KI="$(awk '/MemTotal:/ {print $2}' /proc/meminfo)"
+HOST_CPU_CORES="${PODNODE_HOST_CPU_CORES:-$(nproc)}"
+HOST_MEM_KI="${PODNODE_HOST_MEM_KI:-$(awk '/MemTotal:/ {print $2}' /proc/meminfo)}"
 
 cpu_to_millicores() {
   local v="$1"
