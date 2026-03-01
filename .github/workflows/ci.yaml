@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  smoke:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Shell syntax checks
+        run: |
+          bash -n files/entrypoint.sh
+          bash -n files/podnode-entrypoint.sh
+          bash -n files/podnode-clamp-allocatable.sh
+          bash -n files/escape-cgroup.sh
+          bash -n files/create-kubelet-cgroup.sh
+          bash -n tests/smoke-clamp.sh
+
+      - name: Run clamp smoke test
+        run: |
+          chmod +x tests/smoke-clamp.sh
+          tests/smoke-clamp.sh
